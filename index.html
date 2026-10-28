@@ -1,3 +1,4 @@
+<
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -110,4 +111,791 @@
 
   .leaf-legend {
     display: flex; gap: 18px; margin: 14px 0 4px;
-    font-size: 13px; color: #
+    font-size: 13px; color: #e6d2b0;
+  }
+  .leaf-legend span { display: flex; align-items: center; gap: 5px; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+
+  .record-tip {
+    display: none;
+    margin-top: 10px; padding: 6px 22px; border-radius: 999px;
+    font-size: 16px; font-weight: 700; color: #1a1108;
+    background: linear-gradient(135deg, #ffd76e, #ffb347);
+    box-shadow: 0 4px 18px rgba(255,179,71,0.5);
+    animation: tipPulse 1.2s ease-in-out infinite;
+  }
+  .record-tip.show { display: inline-block; }
+  @keyframes tipPulse {
+    0%, 100% { transform: scale(1); }
+    50%      { transform: scale(1.06); }
+  }
+
+  .duo-score {
+    display: flex; gap: 36px; margin: 12px 0 4px;
+  }
+  .duo-score > div {
+    padding: 12px 26px; border-radius: 14px;
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.1);
+    min-width: 130px;
+  }
+  .duo-score .name { font-size: 15px; color: #c9a97a; }
+  .duo-score .val { font-size: 38px; font-weight: 800; color: #ffb347; }
+  .duo-score .winner {
+    border-color: #ffb347;
+    background: rgba(255,179,71,0.12);
+    box-shadow: 0 0 24px rgba(255,179,71,0.25);
+  }
+  .winner-text { font-size: 20px; font-weight: 800; color: #ffcf5c; margin-top: 10px; }
+</style>
+</head>
+<body>
+
+<canvas id="canvas"></canvas>
+
+<div id="hud">
+  <div id="scoreBox">🍂 0</div>
+  <div id="bestBox">🏆 0</div>
+  <div id="timeBox">⏱ 60s</div>
+</div>
+<div id="playerBox"></div>
+<div id="comboBox"></div>
+<button id="muteBtn" aria-label="声音开关">🔊</button>
+
+<div id="startScreen" class="screen">
+  <h1>拾 秋</h1>
+  <p>点击收集飘落的落叶</p>
+  <p>空中接住加分更多 · 快速连点触发连击</p>
+  <p style="font-size:14px;color:#d98a4a">落叶落地后会闪烁消失，别犹豫！</p>
+  <div class="leaf-legend">
+    <span><i class="dot" style="background:#d93a1e"></i>枫叶 +20/+10</span>
+    <span><i class="dot" style="background:#f2bd26"></i>银杏 +30/+15</span>
+    <span><i class="dot" style="background:#bf262e"></i>红叶 +15/+8</span>
+    <span><i class="dot" style="background:#fad652"></i>金叶 +50/+25</span>
+  </div>
+  <div class="best-line" id="bestOnStart">最高分：0</div>
+  <button id="soloBtn">单人游戏</button>
+  <button id="duoBtn" class="secondary">双人轮流</button>
+  <div class="sub">拖拽空白处可旋转视角 · 滚轮缩放</div>
+</div>
+
+<div id="handoffScreen" class="screen hidden">
+  <h1 class="small" id="handoffTitle">玩家 1 回合结束</h1>
+  <p>得分</p>
+  <div class="score-big" id="handoffScore">0</div>
+  <p id="handoffNext">准备让玩家 2 上场</p>
+  <button id="handoffBtn">玩家 2 开始</button>
+</div>
+
+<div id="endScreen" class="screen hidden">
+  <div id="soloResult">
+    <h1 class="small">时间到</h1>
+    <p>你收集了</p>
+    <div class="score-big" id="finalScore">0</div>
+    <p>分</p>
+    <div class="record-tip" id="recordTip">🎉 新纪录！</div>
+    <div class="best-line" id="bestOnEnd">最高分：0</div>
+  </div>
+
+  <div id="duoResult" style="display:none">
+    <h1 class="small">双人对战结束</h1>
+    <div class="duo-score">
+      <div id="p1Card">
+        <div class="name">玩家 1</div>
+        <div class="val" id="p1Score">0</div>
+      </div>
+      <div id="p2Card">
+        <div class="name">玩家 2</div>
+        <div class="val" id="p2Score">0</div>
+      </div>
+    </div>
+    <div class="winner-text" id="winnerText"></div>
+  </div>
+
+  <button id="restartBtn">再来一局</button>
+  <button id="backBtn" class="secondary">返回主菜单</button>
+</div>
+
+<script type="module">
+import {
+  WebGLEngine, Camera, DirectLight, AmbientLight,
+  PrimitiveMesh, BlinnPhongMaterial, MeshRenderer,
+  Vector3, Vector2, Color
+} from "https://cdn.jsdelivr.net/npm/@galacean/engine@1.3.9/dist/browser.js";
+import { OrbitControl } from "https://cdn.jsdelivr.net/npm/@galacean/engine-toolkit-controls@1.3.9/dist/browser.js";
+
+const engine = await WebGLEngine.create({ canvas: "canvas" });
+engine.canvas.resizeByClientSize();
+window.addEventListener("resize", () => engine.canvas.resizeByClientSize());
+
+const scene = engine.sceneManager.activeScene;
+const root = scene.createRootEntity("root");
+
+try {
+  scene.background.solidColor = new Color(0.86, 0.76, 0.60, 1);
+} catch (e) { }
+
+const ambientEntity = root.createChild("ambient");
+const ambient = ambientEntity.addComponent(AmbientLight);
+ambient.color = new Color(1, 0.96, 0.88, 1);
+ambient.intensity = 0.75;
+
+const lightEntity = root.createChild("dirLight");
+const dirLight = lightEntity.addComponent(DirectLight);
+dirLight.color = new Color(1, 0.9, 0.72, 1);
+dirLight.intensity = 1.25;
+lightEntity.transform.setRotation(48, -35, 0);
+
+const cameraEntity = root.createChild("camera");
+cameraEntity.transform.setPosition(0, 9, 12);
+cameraEntity.transform.lookAt(new Vector3(0, 0, 0));
+const camera = cameraEntity.addComponent(Camera);
+cameraEntity.addComponent(OrbitControl);
+
+const groundEntity = root.createChild("ground");
+const groundRenderer = groundEntity.addComponent(MeshRenderer);
+groundRenderer.mesh = PrimitiveMesh.createPlane(engine, 22, 22);
+const groundMat = new BlinnPhongMaterial(engine);
+groundMat.baseColor = new Color(0.33, 0.25, 0.16, 1);
+groundRenderer.setMaterial(groundMat);
+
+const LEAF_TYPES = [
+  { id: "maple",  color: [0.85, 0.22, 0.12], size: [1.15, 0.08, 0.70], air: 20, ground: 10, fallMul: 1.00, swingMul: 1.0, weight: 40 },
+  { id: "ginkgo", color: [0.95, 0.74, 0.15], size: [0.95, 0.08, 0.95], air: 30, ground: 15, fallMul: 0.85, swingMul: 1.2, weight: 28 },
+  { id: "red",    color: [0.75, 0.15, 0.18], size: [1.25, 0.08, 0.72], air: 15, ground: 8,  fallMul: 1.15, swingMul: 0.8, weight: 24 },
+  { id: "gold",   color: [0.98, 0.84, 0.32], size: [0.78, 0.08, 0.55], air: 50, ground: 25, fallMul: 1.45, swingMul: 1.5, weight: 8  },
+];
+
+for (const t of LEAF_TYPES) {
+  t.mesh = PrimitiveMesh.createCuboid(engine, t.size[0], t.size[1], t.size[2]);
+  t.colorObj = new Color(t.color[0], t.color[1], t.color[2], 1);
+}
+
+function pickLeafType() {
+  let r = Math.random() * 100;
+  for (const t of LEAF_TYPES) {
+    r -= t.weight;
+    if (r <= 0) return t;
+  }
+  return LEAF_TYPES[0];
+}
+
+const LEAF_COUNT = 30;
+const FIELD_HALF = 7.5;
+const LAND_LINGER = 4.0;
+const LAND_FADE = 1.4;
+const leaves = [];
+
+function respawnLeaf(leaf, initial) {
+  const type = pickLeafType();
+  leaf.type = type;
+  leaf.renderer.mesh = type.mesh;
+  leaf.material.baseColor = type.colorObj;
+
+  leaf.baseX = (Math.random() - 0.5) * FIELD_HALF * 2;
+  leaf.baseZ = (Math.random() - 0.5) * FIELD_HALF * 2;
+  leaf.fallSpeed = (2.2 + Math.random() * 1.8) * type.fallMul;
+  leaf.phase = Math.random() * Math.PI * 2;
+  leaf.swingSpeed = (0.7 + Math.random() * 1.3) * type.swingMul;
+  leaf.swingRadius = (0.4 + Math.random() * 1.6) * type.swingMul;
+  leaf.spinAngle = Math.random() * Math.PI * 2;
+  leaf.spinSpeed = (Math.random() - 0.5) * 3.2;
+  leaf.landed = false;
+  leaf.landedTime = 0;
+  leaf.collecting = false;
+  leaf.collectT = 0;
+
+  const y = initial ? 1 + Math.random() * 8 : 9 + Math.random() * 2.5;
+  const x = leaf.baseX + Math.sin(leaf.phase) * leaf.swingRadius;
+  const z = leaf.baseZ + Math.cos(leaf.phase * 0.8) * leaf.swingRadius * 0.7;
+
+  leaf.entity.transform.setScale(1, 1, 1);
+  leaf.entity.transform.setPosition(x, y, z);
+  leaf.entity.transform.setRotation(
+    (Math.random() - 0.5) * 30,
+    leaf.spinAngle * 57.3,
+    (Math.random() - 0.5) * 30
+  );
+}
+
+for (let i = 0; i < LEAF_COUNT; i++) {
+  const entity = root.createChild("leaf_" + i);
+  const renderer = entity.addComponent(MeshRenderer);
+  const material = new BlinnPhongMaterial(engine);
+  renderer.setMaterial(material);
+
+  const leaf = {
+    entity, renderer, material, type: LEAF_TYPES[0],
+    baseX: 0, baseZ: 0,
+    fallSpeed: 2, phase: 0, swingSpeed: 1, swingRadius: 1,
+    spinAngle: 0, spinSpeed: 1,
+    landed: false, landedTime: 0,
+    collecting: false, collectT: 0,
+  };
+  respawnLeaf(leaf, true);
+  leaves.push(leaf);
+}
+
+const MUTE_KEY = "pick-leaves-mute";
+
+function loadMute() {
+  try { return localStorage.getItem(MUTE_KEY) === "1"; } catch (e) { return false; }
+}
+function saveMute(v) {
+  try { localStorage.setItem(MUTE_KEY, v ? "1" : "0"); } catch (e) { }
+}
+
+let muted = loadMute();
+let audioCtx = null;
+
+function ensureAudio() {
+  if (muted) return null;
+  if (!audioCtx) {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return null;
+    try { audioCtx = new AC(); } catch (e) { return null; }
+  }
+  if (audioCtx.state === "suspended") audioCtx.resume();
+  return audioCtx;
+}
+
+function tone(freq, dur, type = "sine", vol = 0.12, slideTo = null, delay = 0) {
+  const ctx = ensureAudio();
+  if (!ctx) return;
+
+  const t0 = ctx.currentTime + delay;
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
+
+  osc.type = type;
+  osc.frequency.setValueAtTime(freq, t0);
+  if (slideTo) osc.frequency.exponentialRampToValueAtTime(slideTo, t0 + dur);
+
+  gain.gain.setValueAtTime(0.0001, t0);
+  gain.gain.exponentialRampToValueAtTime(vol, t0 + 0.012);
+  gain.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+
+  osc.connect(gain);
+  gain.connect(ctx.destination);
+  osc.start(t0);
+  osc.stop(t0 + dur + 0.03);
+}
+
+const sfx = {
+  start() {
+    tone(392, 0.10, "triangle", 0.10);
+    tone(523, 0.14, "triangle", 0.10, null, 0.09);
+  },
+  collect(combo) {
+    const steps = Math.min(Math.max(combo - 1, 0), 12);
+    const f = 520 * Math.pow(1.0595, steps);
+    tone(f, 0.11, "triangle", 0.13, f * 1.45);
+    if (combo >= 3) tone(f * 2, 0.07, "sine", 0.05, null, 0.05);
+  },
+  end() {
+    tone(523, 0.16, "sine", 0.11, 392);
+    tone(392, 0.20, "sine", 0.11, 262, 0.15);
+    tone(262, 0.38, "sine", 0.11, 196, 0.34);
+  },
+  tick() {
+    tone(880, 0.05, "square", 0.045);
+  },
+  handoff() {
+    tone(440, 0.12, "triangle", 0.10);
+    tone(554, 0.12, "triangle", 0.10, null, 0.11);
+    tone(659, 0.18, "triangle", 0.10, null, 0.22);
+  },
+};
+
+const MUSIC_NOTES = [220.00, 261.63, 293.66, 329.63, 392.00, 440.00, 392.00, 329.63];
+let musicTimer = null;
+let musicStep = 0;
+
+function musicTick() {
+  const ctx = ensureAudio();
+  if (!ctx) return;
+
+  const t0 = ctx.currentTime;
+  const freq = MUSIC_NOTES[musicStep % MUSIC_NOTES.length];
+  musicStep++;
+
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
+  osc.type = "sine";
+  osc.frequency.setValueAtTime(freq, t0);
+  gain.gain.setValueAtTime(0.0001, t0);
+  gain.gain.exponentialRampToValueAtTime(0.032, t0 + 0.05);
+  gain.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.55);
+  osc.connect(gain);
+  gain.connect(ctx.destination);
+  osc.start(t0);
+  osc.stop(t0 + 0.6);
+
+  if (musicStep % 8 === 1) {
+    const osc2 = ctx.createOscillator();
+    const g2 = ctx.createGain();
+    osc2.type = "triangle";
+    osc2.frequency.setValueAtTime(110, t0);
+    g2.gain.setValueAtTime(0.0001, t0);
+    g2.gain.exponentialRampToValueAtTime(0.018, t0 + 0.12);
+    g2.gain.exponentialRampToValueAtTime(0.0001, t0 + 1.3);
+    osc2.connect(g2);
+    g2.connect(ctx.destination);
+    osc2.start(t0);
+    osc2.stop(t0 + 1.35);
+  }
+}
+
+function startMusic() {
+  stopMusic();
+  musicStep = 0;
+  musicTimer = setInterval(musicTick, 420);
+}
+function stopMusic() {
+  if (musicTimer) {
+    clearInterval(musicTimer);
+    musicTimer = null;
+  }
+}
+
+const muteBtn = document.getElementById("muteBtn");
+
+function refreshMuteBtn() {
+  muteBtn.textContent = muted ? "🔇" : "🔊";
+  muteBtn.classList.toggle("muted", muted);
+}
+
+muteBtn.addEventListener("click", () => {
+  muted = !muted;
+  saveMute(muted);
+  refreshMuteBtn();
+
+  if (!muted) {
+    ensureAudio();
+    if (playing) startMusic();
+  } else {
+    stopMusic();
+  }
+});
+
+refreshMuteBtn();
+
+const BEST_KEY = "pick-leaves-best";
+
+function loadBest() {
+  try {
+    const v = Number(localStorage.getItem(BEST_KEY));
+    return Number.isFinite(v) && v > 0 ? v : 0;
+  } catch (e) { return 0; }
+}
+function saveBest(v) {
+  try { localStorage.setItem(BEST_KEY, String(v)); } catch (e) { }
+}
+
+let bestScore = loadBest();
+
+const SOLO_DURATION = 60;
+const DUO_ROUND = 30;
+const MAX_SPEED_MUL = 1.9;
+
+let mode = "solo";
+let currentPlayer = 1;
+let playerScores = [0, 0];
+
+let playing = false;
+let score = 0;
+let timeLeft = SOLO_DURATION;
+let elapsed = 0;
+let difficulty = 1;
+let lastTime = performance.now();
+let lastTickSec = -1;
+
+let combo = 0;
+let comboTimer = 0;
+const COMBO_WINDOW = 1.8;
+
+const scoreBox = document.getElementById("scoreBox");
+const bestBox = document.getElementById("bestBox");
+const timeBox = document.getElementById("timeBox");
+const playerBox = document.getElementById("playerBox");
+const comboBox = document.getElementById("comboBox");
+
+const startScreen = document.getElementById("startScreen");
+const handoffScreen = document.getElementById("handoffScreen");
+const endScreen = document.getElementById("endScreen");
+
+const handoffTitle = document.getElementById("handoffTitle");
+const handoffScore = document.getElementById("handoffScore");
+const handoffNext = document.getElementById("handoffNext");
+const handoffBtn = document.getElementById("handoffBtn");
+
+const soloResult = document.getElementById("soloResult");
+const duoResult = document.getElementById("duoResult");
+const finalScoreEl = document.getElementById("finalScore");
+const recordTip = document.getElementById("recordTip");
+const bestOnStart = document.getElementById("bestOnStart");
+const bestOnEnd = document.getElementById("bestOnEnd");
+
+const p1ScoreEl = document.getElementById("p1Score");
+const p2ScoreEl = document.getElementById("p2Score");
+const p1Card = document.getElementById("p1Card");
+const p2Card = document.getElementById("p2Card");
+const winnerText = document.getElementById("winnerText");
+
+function roundDuration() {
+  return mode === "solo" ? SOLO_DURATION : DUO_ROUND;
+}
+
+function updateHUD() {
+  scoreBox.textContent = "🍂 " + score;
+  bestBox.textContent = "🏆 " + bestScore;
+  timeBox.textContent = "⏱ " + Math.ceil(timeLeft) + "s";
+  timeBox.classList.toggle("warn", playing && timeLeft <= 10);
+
+  if (mode === "duo") {
+    playerBox.textContent = "玩家 " + currentPlayer + " 回合";
+    playerBox.classList.add("show");
+  } else {
+    playerBox.classList.remove("show");
+  }
+}
+
+function hideAllScreens() {
+  startScreen.classList.add("hidden");
+  handoffScreen.classList.add("hidden");
+  endScreen.classList.add("hidden");
+}
+
+function startSolo() {
+  mode = "solo";
+  currentPlayer = 1;
+  playerScores = [0, 0];
+  startRound();
+}
+
+function startDuo() {
+  mode = "duo";
+  currentPlayer = 1;
+  playerScores = [0, 0];
+  startRound();
+}
+
+function startRound() {
+  ensureAudio();
+
+  score = 0;
+  timeLeft = roundDuration();
+  elapsed = 0;
+  difficulty = 1;
+  combo = 0;
+  comboTimer = 0;
+  lastTickSec = -1;
+  playing = true;
+
+  comboBox.classList.remove("pop");
+  hideAllScreens();
+  recordTip.classList.remove("show");
+
+  for (const leaf of leaves) respawnLeaf(leaf, true);
+
+  updateHUD();
+  sfx.start();
+  startMusic();
+  lastTime = performance.now();
+}
+
+function endRound() {
+  playing = false;
+  combo = 0;
+  comboTimer = 0;
+  stopMusic();
+
+  if (mode === "solo") {
+    endSolo();
+  } else {
+    endDuoRound();
+  }
+}
+
+function endSolo() {
+  finalScoreEl.textContent = score;
+
+  const isNewRecord = score > bestScore;
+  if (isNewRecord) {
+    bestScore = score;
+    saveBest(bestScore);
+  }
+
+  recordTip.classList.toggle("show", isNewRecord);
+  bestOnEnd.textContent = "最高分：" + bestScore;
+
+  soloResult.style.display = "";
+  duoResult.style.display = "none";
+
+  updateHUD();
+  endScreen.classList.remove("hidden");
+  sfx.end();
+}
+
+function endDuoRound() {
+  playerScores[currentPlayer - 1] = score;
+
+  if (currentPlayer === 1) {
+    handoffTitle.textContent = "玩家 1 回合结束";
+    handoffScore.textContent = score;
+    handoffNext.textContent = "准备让玩家 2 上场";
+    handoffBtn.textContent = "玩家 2 开始";
+
+    updateHUD();
+    handoffScreen.classList.remove("hidden");
+    sfx.handoff();
+    return;
+  }
+
+  const p1 = playerScores[0];
+  const p2 = playerScores[1];
+
+  p1ScoreEl.textContent = p1;
+  p2ScoreEl.textContent = p2;
+  p1Card.classList.toggle("winner", p1 > p2);
+  p2Card.classList.toggle("winner", p2 > p1);
+
+  if (p1 > p2) winnerText.textContent = "🏆 玩家 1 获胜！";
+  else if (p2 > p1) winnerText.textContent = "🏆 玩家 2 获胜！";
+  else winnerText.textContent = "🤝 平局！";
+
+  soloResult.style.display = "none";
+  duoResult.style.display = "";
+
+  updateHUD();
+  endScreen.classList.remove("hidden");
+  sfx.end();
+}
+
+document.getElementById("soloBtn").addEventListener("click", startSolo);
+document.getElementById("duoBtn").addEventListener("click", startDuo);
+
+handoffBtn.addEventListener("click", () => {
+  currentPlayer = 2;
+  startRound();
+});
+
+document.getElementById("restartBtn").addEventListener("click", () => {
+  if (mode === "solo") {
+    startSolo();
+  } else {
+    startDuo();
+  }
+});
+
+document.getElementById("backBtn").addEventListener("click", () => {
+  playing = false;
+  stopMusic();
+  hideAllScreens();
+  startScreen.classList.remove("hidden");
+  updateHUD();
+});
+
+function showFloat(clientX, clientY, text) {
+  const el = document.createElement("div");
+  el.className = "float-text";
+  el.textContent = text;
+  el.style.left = clientX + "px";
+  el.style.top = clientY + "px";
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 950);
+}
+
+function showCombo(n) {
+  comboBox.textContent = "x" + n + " 连击";
+  comboBox.classList.remove("pop");
+  void comboBox.offsetWidth;
+  comboBox.classList.add("pop");
+}
+
+function tryCollect(leaf, clientX, clientY) {
+  if (leaf.collecting) return;
+
+  leaf.collecting = true;
+  leaf.collectT = 0;
+
+  const base = leaf.landed ? leaf.type.ground : leaf.type.air;
+
+  if (comboTimer > 0) combo += 1;
+  else combo = 1;
+  comboTimer = COMBO_WINDOW;
+
+  const bonus = Math.min(combo - 1, 5) * 5;
+  const gained = base + bonus;
+
+  score += gained;
+  updateHUD();
+
+  showFloat(clientX, clientY, "+" + gained);
+  if (combo >= 2) showCombo(combo);
+  sfx.collect(combo);
+}
+
+engine.on("frameUpdate", () => {
+  const now = performance.now();
+  let dt = now - lastTime;
+  lastTime = now;
+  if (dt > 100) dt = 100;
+  const dts = dt / 1000;
+
+  if (playing) {
+    elapsed += dts;
+    const t = Math.min(elapsed / roundDuration(), 1);
+    difficulty = 1 + t * (MAX_SPEED_MUL - 1);
+  }
+
+  for (const leaf of leaves) {
+    if (leaf.collecting) {
+      leaf.collectT += dts;
+      const p = Math.min(1, leaf.collectT / 0.28);
+      const s = Math.max(0, 1 - p * p);
+      leaf.entity.transform.setScale(s, s, s);
+      const pos = leaf.entity.transform.position;
+      leaf.entity.transform.setPosition(pos.x, pos.y + dts * 2.2, pos.z);
+      if (p >= 1) respawnLeaf(leaf, false);
+      continue;
+    }
+
+    if (leaf.landed) {
+      leaf.landedTime += dts;
+
+      if (leaf.landedTime >= LAND_LINGER + LAND_FADE) {
+        respawnLeaf(leaf, false);
+        continue;
+      }
+
+      if (leaf.landedTime > LAND_LINGER) {
+        const p = (leaf.landedTime - LAND_LINGER) / LAND_FADE;
+        const shrink = 1 - p * 0.85;
+        const flicker = 0.55 + 0.45 * Math.abs(Math.sin(leaf.landedTime * 18));
+        leaf.entity.transform.setScale(shrink * flicker, shrink * flicker, shrink * flicker);
+      }
+      continue;
+    }
+
+    leaf.phase += dts * leaf.swingSpeed * difficulty;
+    leaf.spinAngle += dts * leaf.spinSpeed * difficulty;
+
+    const pos = leaf.entity.transform.position;
+    const x = leaf.baseX + Math.sin(leaf.phase) * leaf.swingRadius;
+    const z = leaf.baseZ + Math.cos(leaf.phase * 0.8) * leaf.swingRadius * 0.7;
+    const newY = pos.y - leaf.fallSpeed * difficulty * dts;
+
+    if (newY <= 0.06) {
+      leaf.landed = true;
+      leaf.landedTime = 0;
+      leaf.entity.transform.setScale(1, 1, 1);
+      leaf.entity.transform.setPosition(x, 0.06, z);
+      leaf.entity.transform.setRotation(0, leaf.spinAngle * 57.3, 0);
+    } else {
+      leaf.entity.transform.setPosition(x, newY, z);
+      leaf.entity.transform.setRotation(
+        Math.sin(leaf.phase) * 26,
+        leaf.spinAngle * 57.3,
+        Math.cos(leaf.phase) * 22
+      );
+    }
+  }
+
+  if (comboTimer > 0) {
+    comboTimer -= dts;
+    if (comboTimer <= 0) {
+      comboTimer = 0;
+      combo = 0;
+    }
+  }
+
+  if (playing) {
+    timeLeft = Math.max(0, roundDuration() - elapsed);
+
+    const sec = Math.ceil(timeLeft);
+    if (sec <= 10 && sec > 0 && sec !== lastTickSec) {
+      lastTickSec = sec;
+      sfx.tick();
+    }
+
+    updateHUD();
+
+    if (timeLeft <= 0) endRound();
+  }
+});
+
+const canvasEl = document.getElementById("canvas");
+
+function pickLeaf(clientX, clientY) {
+  const rect = canvasEl.getBoundingClientRect();
+  const px = clientX - rect.left;
+  const py = clientY - rect.top;
+  const ray = camera.screenPointToRay(new Vector2(px, py));
+
+  const ox = ray.origin.x, oy = ray.origin.y, oz = ray.origin.z;
+  const dx = ray.direction.x, dy = ray.direction.y, dz = ray.direction.z;
+
+  let bestLeaf = null;
+  let bestT = Infinity;
+  const R2 = 0.7 * 0.7;
+
+  for (const leaf of leaves) {
+    if (leaf.collecting) continue;
+    const p = leaf.entity.transform.position;
+
+    const ocx = ox - p.x;
+    const ocy = oy - p.y;
+    const ocz = oz - p.z;
+
+    const b = ocx * dx + ocy * dy + ocz * dz;
+    const c = ocx * ocx + ocy * ocy + ocz * ocz - R2;
+    const disc = b * b - c;
+    if (disc < 0) continue;
+
+    const t = -b - Math.sqrt(disc);
+    if (t > 0 && t < bestT) {
+      bestT = t;
+      bestLeaf = leaf;
+    }
+  }
+  return bestLeaf;
+}
+
+let downLeaf = null;
+let downX = 0, downY = 0, downTime = 0;
+
+canvasEl.addEventListener("pointerdown", (e) => {
+  if (!playing) return;
+  downX = e.clientX;
+  downY = e.clientY;
+  downTime = performance.now();
+  downLeaf = pickLeaf(e.clientX, e.clientY);
+});
+
+window.addEventListener("pointerup", (e) => {
+  if (!playing || !downLeaf) return;
+
+  const dx = e.clientX - downX;
+  const dy = e.clientY - downY;
+  const moved = Math.sqrt(dx * dx + dy * dy);
+  const elapsedMs = performance.now() - downTime;
+
+  const isTouch = e.pointerType === "touch";
+  const moveLimit = isTouch ? 10 : 7;
+  const timeLimit = isTouch ? 400 : Infinity;
+
+  if (moved < moveLimit && elapsedMs < timeLimit) {
+    tryCollect(downLeaf, e.clientX, e.clientY);
+  }
+  downLeaf = null;
+});
+
+window.addEventListener("pointercancel", () => { downLeaf = null; });
+
+bestOnStart.textContent = "最高分：" + bestScore;
+updateHUD();
+engine.run();
+</script>
+</body>
+</html>
