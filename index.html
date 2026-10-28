@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+<title>拾秋 · 捡落叶</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { overflow: hidden; font-family: "PingFang SC", "Microsoft YaHei", system-ui, sans-serif; background: #1a1108; }
+  canvas { display: block; width: 100vw; height: 100vh; touch-action: none; }
+
+  #hud {
+    position: fixed; top: 18px; left: 0; right: 0; z-index: 5;
+    display: flex; justify-content: center; gap: 40px;
+    font-size: 22px; font-weight: 700; color: #fff;
+    text-shadow: 0 2px 8px rgba(0,0,0,0.6);
+    pointer-events: none; user-select: none;
+  }
+  #playerBox {
+    display: none;
+    position: fixed; top: 58px; left: 50%; transform: translateX(-50%);
+    z-index: 5; pointer-events: none; user-select: none;
+    font-size: 18px; font-weight: 800; letter-spacing: 2px;
+    color: #ffcf5c; text-shadow: 0 2px 8px rgba(0,0,0,0.6);
+  }
+  #playerBox.show { display: block; }
+
+  #timeBox.warn { color: #ff5a4d; animation: blink 0.5s ease-in-out infinite alternate; }
+  @keyframes blink { from { opacity: 1; } to { opacity: 0.4; } }
+
+  #muteBtn {
+    position: fixed; top: 16px; right: 16px; z-index: 7;
+    width: 46px; height: 46px; border-radius: 50%;
+    border: none; cursor: pointer; font-size: 20px;
+    background: rgba(0,0,0,0.35); color: #fff;
+    display: flex; align-items: center; justify-content: center;
+    backdrop-filter: blur(6px);
+    transition: transform 0.15s ease, background 0.15s ease, opacity 0.15s ease;
+  }
+  #muteBtn:hover { transform: scale(1.08); background: rgba(0,0,0,0.5); }
+  #muteBtn.muted { opacity: 0.5; }
+
+  #comboBox {
+    position: fixed; top: 90px; left: 50%;
+    transform: translateX(-50%);
+    z-index: 6; pointer-events: none; user-select: none;
+    font-size: 30px; font-weight: 900; letter-spacing: 1px;
+    color: #ffcf5c; text-shadow: 0 3px 12px rgba(0,0,0,0.55);
+    opacity: 0;
+  }
+  #comboBox.pop { animation: comboPop 0.6s ease-out; }
+  @keyframes comboPop {
+    0%   { opacity: 0; transform: translateX(-50%) scale(0.6); }
+    40%  { opacity: 1; transform: translateX(-50%) scale(1.18); }
+    100% { opacity: 0; transform: translateX(-50%) scale(1); }
+  }
+
+  .float-text {
+    position: fixed; z-index: 8; pointer-events: none; user-select: none;
+    font-size: 26px; font-weight: 800; color: #ffcf5c;
+    text-shadow: 0 2px 8px rgba(0,0,0,0.55);
+    transform: translate(-50%, -50%);
+    animation: floatUp 0.9s ease-out forwards;
+  }
+  @keyframes floatUp {
+    0%   { opacity: 1; transform: translate(-50%, -50%) scale(0.8); }
+    30%  { opacity: 1; transform: translate(-50%, -90%) scale(1.15); }
+    100% { opacity: 0; transform: translate(-50%, -200%) scale(1); }
+  }
+
+  .screen {
+    position: fixed; inset: 0; z-index: 10;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    text-align: center; color: #fff;
+    background: radial-gradient(circle at 50% 40%, rgba(60,35,10,0.85), rgba(12,8,3,0.95));
+    backdrop-filter: blur(3px);
+    user-select: none;
+  }
+  .screen.hidden { display: none; }
+
+  .screen h1 {
+    font-size: 64px; letter-spacing: 8px; margin-bottom: 8px;
+    background: linear-gradient(135deg, #ffb347, #d2691e);
+    -webkit-background-clip: text; background-clip: text;
+    color: transparent;
+  }
+  .screen h1.small { font-size: 44px; }
+  .screen p { font-size: 17px; color: #e6d2b0; margin: 5px 0; line-height: 1.6; }
+  .screen .sub { font-size: 14px; color: #a88b63; margin-top: 14px; }
+
+  .screen button {
+    margin-top: 20px; padding: 15px 48px;
+    font-size: 20px; font-weight: 700; letter-spacing: 2px;
+    border: none; border-radius: 999px; cursor: pointer; color: #fff;
+    background: linear-gradient(135deg, #e8862e, #c85a1a);
+    box-shadow: 0 8px 26px rgba(210,105,30,0.45);
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+  }
+  .screen button:hover { transform: translateY(-2px) scale(1.04); box-shadow: 0 12px 32px rgba(210,105,30,0.6); }
+  .screen button:active { transform: scale(0.98); }
+  .screen button.secondary {
+    background: linear-gradient(135deg, #5a4632, #3d2e1f);
+    box-shadow: 0 8px 22px rgba(0,0,0,0.4);
+  }
+
+  .score-big { font-size: 72px; font-weight: 800; color: #ffb347; margin: 6px 0; }
+
+  .best-line { font-size: 16px; color: #c9a97a; margin-top: 6px; }
+
+  .leaf-legend {
+    display: flex; gap: 18px; margin: 14px 0 4px;
+    font-size: 13px; color: #
